@@ -1,3 +1,5 @@
+// Add mikalhart/TinyGPSPlus@^1.0.3 to your ini file
+
 #ifndef GPS_h
 #define GPS_h
 
