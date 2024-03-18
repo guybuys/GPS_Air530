@@ -1,11 +1,10 @@
-#include "GPS.h"
+#include "gps.h"
 
 GPS::GPS(HardwareSerial& serial, int txPin, int rxPin) : gpsSerial(serial) {
     gpsSerial.begin(9600, SERIAL_8N1, txPin, rxPin);
     bool _gps_debug = false;
-    unsigned long _rxTime = 0;
-    bool _locationValid = true;
-    bool _rxOK = true;
+    unsigned long _rxTimeReload = 1000;
+    _gps_status = GPS_Status::NO_GPS;
 }
 
 void GPS::begin(int baudrate) {
@@ -20,14 +19,14 @@ void GPS::update() {
         }
         if (gps.encode(rx_char)) {
             // Process GPS data
-            if(!_isNewSecond) {
-                uint8_t seconds = gps.time.second();
-                if (seconds != _seconds) {
-                    _seconds = seconds;
-                    _isNewSecond = true;
-                }
+            if(_gps_status == GPS_Status::NO_GPS) {
+                _gps_status = GPS_Status::NO_TIME;
+                _seconds = gps.time.second();
+                _locationUpdateTime = millis() + 1000; // Reused this for heartbeat
             }
-            _rxTime = millis();
+            else {
+                _rxTimeReload = millis() + 1000;
+            }
         }
     }
 }
@@ -40,53 +39,60 @@ bool GPS::isDataValid() {
     return gps.location.isValid();
 }
 
-bool GPS::_isNew() {
-    if (_isNewSecond) {
-        _isNewSecond = false;
-        return true;
+GPS_Status GPS::getGpsStatus() {
+    unsigned long time_now = millis();
+    if (time_now >= _rxTimeReload) {
+        // No valid rx within 1 second
+        _rxTimeReload += 1000;
+        _gps_status = GPS_Status::NO_GPS; 
+        return GPS_Status::NO_GPS;
+    } else {   
+        if (_gps_status == GPS_Status::NO_GPS) {
+            return GPS_Status::IDLE;
+        }  
     }
-    return false;
-}
-
-bool GPS::_isReceiving() {
-    unsigned long time = millis();
-    if ((time - _rxTime) > 2000) {
-        return false;
-    }
-    return true;
-}
-
-int8_t GPS::getGPSinfo() {
-    bool rx_ok = _isReceiving();
-    bool valid_ok = gps.location.isValid();
-    /*
-    Serial.print("Rx_ok and Valid_ok = ");
-    Serial.print(rx_ok);
-    Serial.print(" ");
-    Serial.println(valid_ok);
-    */
-    if(rx_ok && valid_ok) {
-        // All is well, return 0
-        if(_isNew()) {
-            return 1;
+    // If we got here, there is at least communication received from the GPS module
+    bool new_second = false;
+    uint8_t seconds = gps.time.second();
+    if (seconds != _seconds) {
+        _seconds = seconds;
+        new_second = true;
+        if (_gps_status == GPS_Status::NO_TIME) {
+            _gps_status = GPS_Status::LOCATION_NOK;
+            return GPS_Status::LOCATION_NOK;
         }
-        return 0;
     }
-    int8_t errorcode = 0;
-    if(!valid_ok) {
-        errorcode += 2;
+    if (_gps_status == GPS_Status::NO_TIME) {
+        if (time_now >= _locationUpdateTime) {
+            _locationUpdateTime += 1000;
+            if (!new_second) {
+                return GPS_Status::NO_TIME;
+            }
+        }
+    }   
+    if (new_second) {
+        if (gps.location.isUpdated()) {
+            _locationUpdateTime = millis();
+            _gps_status = GPS_Status::LOCATION_OK;
+            return GPS_Status::LOCATION_OK;
+        }
+        else {
+            if ((time_now - _locationUpdateTime) > 1000) {
+                // No location update happened in 1 second
+                _locationUpdateTime += 1000;
+            
+                // A new second is elapsed
+                if (_gps_status == GPS_Status::LOCATION_OK) {
+                    _gps_status = GPS_Status::LOCATION_NOK;
+                    return GPS_Status::LOCATION_NOK;
+                }
+                if (_gps_status == GPS_Status::LOCATION_NOK) {
+                    return GPS_Status::LOCATION_NOK;
+                }
+            }  
+        }
     }
-    if (!rx_ok) {
-        errorcode += 4;
-    }
-    if ((valid_ok != _locationValid) || (rx_ok != _rxOK)){
-        errorcode = -errorcode;
-        // Serial.print("Error change: ");
-        // Serial.println(errorcode);
-    }
-    _locationValid = valid_ok;
-    _rxOK = rx_ok;
-    return errorcode;
+    return GPS_Status::IDLE;
 }
 
 float GPS::getLatitude() {
@@ -131,6 +137,10 @@ int GPS::getMinute() {
 
 int GPS::getSecond() {
     return gps.time.second();
+}
+
+int GPS::getSatellites() {
+    return gps.satellites.value();
 }
 
 char* GPS::getLocalTime() {
