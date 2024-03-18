@@ -1,0 +1,205 @@
+#include <Arduino.h>
+#include <HardwareSerial.h>
+#include "gps.h"
+
+// OLED Display
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Define the RX and TX pins for serial communication with GPS
+#define GPS_RX_PIN 25
+#define GPS_TX_PIN 26
+
+// Define the baud rate for serial communication
+#define GPS_BAUD_RATE 9600
+
+// Create a serial object using the defined pins
+HardwareSerial gpsSerial(1); // Using UART 1 on ESP32
+
+// Define the GPS object
+GPS gps(gpsSerial, GPS_TX_PIN, GPS_RX_PIN); // was GPS_TX_PIN, GPS_RX_PIN
+
+// OLED
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET -1    // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+//#define I2C_SDA_PIN 25
+..#define I2C_SCL_PIN 26
+
+bool display_on = true;
+// END_OLED
+
+void setup() {
+    // Start serial communication
+  Serial.begin(115200);
+  Serial.println("Starting");
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  // Configure the serial port with the specified baud rate
+  gps.begin(GPS_BAUD_RATE); // Initialize GPS serial connection
+  //gps.setDebug(true);
+
+  // Disp
+  Wire.begin(); // Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN) if other pins are used
+  // Display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;) {  // Don't proceed, loop forever
+      delay(500);
+    }   
+  }
+  digitalWrite(LED_BUILTIN, LOW);
+
+  // Clear the buffer
+  display.clearDisplay();
+  // Startup Text
+  display.setTextSize(2);      // Normal 1:1 pixel scale
+  display.setTextColor(WHITE); // Draw white text
+  display.setCursor(0, 0); // Start at top-left corner
+  display.println(F("Booting"));
+  display.setCursor(0, 16);
+  display.setTextSize(1);
+  display.println(F("Waiting 4 GPS signal"));
+  display.setCursor(0, 24);
+  Serial.println(F("Connecting."));
+  display.display();
+
+}
+
+unsigned long prev_time;  // Filthy, dirty global variable
+
+void loop() {
+  // Update GPS data
+  gps.update();
+  GPS_Status gps_status = gps.getGpsStatus();
+  if(gps_status != GPS_Status::IDLE) {
+      digitalWrite(LED_BUILTIN, HIGH);
+      unsigned long time_now = millis();
+      Serial.print(time_now - prev_time);
+      prev_time = time_now;
+      Serial.print(", GPS_Status: ");
+      int statusAsInt = static_cast<int>(gps_status);
+      Serial.println(statusAsInt);
+  }
+
+  if (gps_status == GPS_Status::LOCATION_OK) {
+    // Check if GPS data is valid
+    // Retrieve GPS data
+    float latitude = gps.getLatitude();
+    float longitude = gps.getLongitude();
+    float altitude = gps.getAltitude();
+    float speed = gps.getSpeed();
+    float course = gps.getCourse();
+    int year = gps.getYear();
+    int month = gps.getMonth();
+    int day = gps.getDay();
+    int hour = gps.getHour();
+    int minute = gps.getMinute();
+    int second = gps.getSecond();
+
+    // Print GPS data to Serial
+    /*
+    Serial.print(gps.getLocalTime());
+    Serial.print(";");
+    Serial.print(latitude, 6);
+    Serial.print(";");
+    Serial.print(longitude, 6);
+    Serial.print(";");
+    Serial.print(altitude);
+    Serial.print(";");
+    Serial.print(speed);
+    Serial.print(";");
+    Serial.println(course);
+    */
+    
+    // Clear the buffer
+    display.clearDisplay();
+    display.setTextSize(2);      // Normal 1:1 pixel scale
+    display.setTextColor(WHITE); // Draw white text
+    display.setCursor(0, 0); // Start at top-left corner
+    display.println(gps.getLocalTime());
+    display.setCursor(0, 16);
+    display.setTextSize(1);
+    display.print("Lat: ");
+    display.println(latitude, 6);
+    display.setCursor(0, 24);
+    display.print("Lon: ");
+    display.println(longitude, 6);
+    display.setCursor(0, 36);
+    display.print("Speed: ");
+    display.setTextSize(2);
+    display.setCursor(40, 32);
+    display.println(speed);
+    display.setCursor(0, 48);
+    display.setTextSize(1);
+    display.print("Course: ");
+    display.println(course);
+    display.setCursor(0, 56);
+    display.print("Satellites: ");
+    display.println(gps.getSatellites());
+    display.display();
+    gps.setDebug(false);
+  }
+  else {  // GPS ERROR
+    if(gps_status != GPS_Status::IDLE) {
+      if(gps_status == GPS_Status::LOCATION_NOK) {
+        int year = gps.getYear();
+        int month = gps.getMonth();
+        int day = gps.getDay();
+        int hour = gps.getHour();
+        int minute = gps.getMinute();
+        int second = gps.getSecond();
+        display.clearDisplay();
+        display.setTextSize(2);      // Normal 1:1 pixel scale
+        display.setTextColor(WHITE); // Draw white text
+        display.setCursor(0, 0); // Start at top-left corner
+        display.println(gps.getLocalTime());
+        display.setCursor(0, 16);
+        display.setTextSize(1);
+        display.print("No GPS Location");
+        
+        display.setCursor(0, 56);
+        display.print("Satellites: ");
+        display.println(gps.getSatellites());
+        display.display();
+        gps.setDebug(false);
+      }
+      if(gps_status == GPS_Status::NO_TIME) {
+        display.clearDisplay();
+        display.setTextSize(2);      // Normal 1:1 pixel scale
+        display.setTextColor(WHITE); // Draw white text
+        display.setCursor(0, 0); // Start at top-left corner
+        display.println("Waiting...");
+        display.setCursor(0, 16);
+        display.setTextSize(1);
+        display.print("No valid GPS signal");
+        display.setCursor(0, 56);
+        display.print("Satellites:     ");
+        display.println(gps.getSatellites());
+        display.display();
+        gps.setDebug(false);
+      }  
+      if(gps_status == GPS_Status::NO_GPS) {
+        display.clearDisplay();
+        display.setTextSize(2);      // Normal 1:1 pixel scale
+        display.setTextColor(WHITE); // Draw white text
+        display.setCursor(0, 0); // Start at top-left corner
+        display.println("ERROR");
+        display.setCursor(0, 16);
+        display.setTextSize(1);
+        display.print("No GPS data received");
+        display.display();
+        gps.setDebug(true);
+      }  
+    }
+    else {
+      digitalWrite(LED_BUILTIN, LOW);
+    }
+  }
+  delay(10);
+}
